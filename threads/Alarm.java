@@ -91,7 +91,7 @@ public class Alarm {
     //Added helper function to sort the list of sleeping threads
     public void sortThreads() {
     	long one, two;
-    	for (int i = 0; i < sleepingThreads.size() - 1; i++) {
+    	for (int i = 0; i < sleepingThreads.size() - 2; i++) {
     		one = sleepingThreads.get(i).getTime();
     		two = sleepingThreads.get(i + 1).getTime();
     		
