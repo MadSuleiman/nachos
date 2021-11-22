@@ -27,6 +27,11 @@ public class UserProcess {
 	pageTable = new TranslationEntry[numPhysPages];
 	for (int i=0; i<numPhysPages; i++)
 	    pageTable[i] = new TranslationEntry(i,i, true,false,false,false);
+	
+	myFileSlots = new OpenFile[16];
+	myFileSlots[0] = UserKernel.console.openForReading();
+	myFileSlots[1] = UserKernel.console.openForWriting();
+	
     }
     
     /**
@@ -346,9 +351,137 @@ public class UserProcess {
 	return 0;
     }
 
+    private int handleCreate(int myAddr) {
+    	String file = readVirtualMemoryString(myAddr,256);	
+    	OpenFile newfile = ThreadedKernel.fileSystem.open(file,false);
+    	
+    	if(newfile != null){
+    			return -1;
+    	}
+
+    	for (int i = 0; i < myFileSlots.length; i++){
+    		if(myFileSlots[i] == null){
+    			newfile = ThreadedKernel.fileSystem.open(file,true);
+    			myFileSlots[i] = newfile;
+
+    			if(myFileSlots[i] != null){
+    				return i;
+    			}
+    			else{
+    				newfile.close();
+    				return -1;
+    			}
+    		}
+    	}
+    	newfile.close();
+    	return -1;
+    }
+
+    private int handleOpen(int myAddr) {
+    	if(myAddr < 0){
+    		return -1;
+    	}
+    	
+    	String file = readVirtualMemoryString(myAddr,256);	
+    	OpenFile newfile = ThreadedKernel.fileSystem.open(file, false);
+    	
+    	if(newfile == null){
+    		return -1;
+    	}
+
+    	for (int i = 0; i < myFileSlots.length; i++){
+    		if(myFileSlots[i] == null){
+    			myFileSlots[i] = newfile;
+
+    			if(myFileSlots[i] != null){
+    				return i;
+    			}
+    			else{
+    				newfile.close();
+    				return -1;
+    			}
+    		}
+    	}
+    	newfile.close();
+    	return -1;
+    }
+
+    private int handleRead(int slotNum, int vaddr, int numBytes) {
+    	if (slotNum < 0 || myFileSlots[slotNum] == null || slotNum >= myFileSlots.length) {
+    		return -1;
+    	}
+
+	    OpenFile file = myFileSlots[slotNum];
+	
+	    byte[] tmp = new byte[numBytes];
+	    int bRead = file.read(tmp, 0, numBytes);
+	    int bWrite = writeVirtualMemory(vaddr, tmp, 0, bRead);
+	
+	    if (bRead != bWrite){
+	        return -1;
+	    }
+	
+	    return bRead;
+    }
+    
+    private int handleWrite(int slotNum, int vaddr, int numBytes) {
+        OpenFile file = myFileSlots[slotNum];
+        if(file != null){
+            int bytesTransfering = 0;
+    		byte[] transfer_buffer = new byte[Processor.pageSize];
+            if (numBytes ==0){
+                return 0;
+            }
+    		while (numBytes > 0) {
+    			int readlen = Math.min(Processor.pageSize, numBytes);
+    			int readMem = readVirtualMemory(vaddr, transfer_buffer, 0, readlen);
+                
+                if (readlen > readMem){
+                    return -1;
+                }
+    			if (readMem == -1){
+                    return -1;
+                }
+    			int wrtBytes = file.write(transfer_buffer, 0, readMem);
+    			if (wrtBytes != readMem) {
+    				return -1;
+    			}
+    			numBytes = numBytes - readMem;
+    			vaddr = vaddr + readMem;
+    			bytesTransfering = bytesTransfering + readMem;
+    		}
+    		return bytesTransfering;
+        }else{
+            return -1;
+        }
+    }
+
+    private int handleClose(int slotNum) {
+    	if(slotNum < 0 || slotNum > 15){
+    		return -1;
+    	}
+    	if(myFileSlots[slotNum] != null){
+    		myFileSlots[slotNum].close();
+    		myFileSlots[slotNum] = null;
+    		return 0;
+    	}
+    	return -1;
+    }
+    
+    private int handleUnlink(int myAddr){
+    	if(myAddr < 0){
+    		return -1;
+    	}	
+    	String file = readVirtualMemoryString(myAddr,256);	
+		if(ThreadedKernel.fileSystem.remove(file)){
+			return 0;
+		}
+		return -1;
+    }
+
 
     private static final int
-        syscallHalt = 0,
+    syscallHalt = 0,
 	syscallExit = 1,
 	syscallExec = 2,
 	syscallJoin = 3,
@@ -391,8 +524,18 @@ public class UserProcess {
 	switch (syscall) {
 	case syscallHalt:
 	    return handleHalt();
-
-
+	case syscallCreate: //4
+	   return handleCreate(a0);
+	case syscallOpen: //5
+	   return handleOpen(a0);
+	case syscallRead: //6
+	   return handleRead(a0, a1, a2);
+	case syscallWrite: //7
+	   return handleWrite(a0, a1, a2);
+	case syscallClose: //8
+	   return handleClose(a0);
+	case syscallUnlink: //9
+	   return handleUnlink(a0);
 	default:
 	    Lib.debug(dbgProcess, "Unknown syscall " + syscall);
 	    Lib.assertNotReached("Unknown system call!");
@@ -446,4 +589,6 @@ public class UserProcess {
 	
     private static final int pageSize = Processor.pageSize;
     private static final char dbgProcess = 'a';
+    
+    protected OpenFile[] myFileSlots;
 }
